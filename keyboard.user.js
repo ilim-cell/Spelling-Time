@@ -6,7 +6,10 @@
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
 // @grant        none
+// @updateURL    https://github.com/ilim-cell/Spelling-Time/raw/refs/heads/main/keyboard.meta.js
+// @downloadURL  https://github.com/ilim-cell/Spelling-Time/raw/refs/heads/main/keyboard.user.js
 // ==/UserScript==
+
 
 // IMPORTANT:
 
