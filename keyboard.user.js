@@ -1,17 +1,17 @@
 // ==UserScript==
-// @name         Spelling Time - Physical Keyboard Support
+// @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
 // @version      1.4
-// @description  Spelling Time doesn't support physical keyboards. Fix that in a userscript.
+// @description  Add keyboard support to Spelling Time
 // @author       Isaac
-// @match        https://haydnsbooks.github.io/Spelling-Time*
+// @match        *://*.haydnsbooks.github.io/Spelling-Time/*
 // @grant        none
 // ==/UserScript==
 
 // IMPORTANT:
 
 
-// CLICK ON THE "INSTALL" BUTTON ABOVE THIS SCRIPT
+// CLICK ON THE "INSTALL" BUTTON ABOVE THIS SCRIPT!
 
 
 
