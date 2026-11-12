@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
-// @version      1.5
+// @version      1.6
 // @description  Add keyboard support to Spelling Time
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
