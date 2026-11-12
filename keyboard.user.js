@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
-// @version      1.5
+// @version      1.6
 // @description  Add keyboard support to Spelling Time
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
@@ -12,6 +12,21 @@
 
 (function() {
     'use strict';
+
+    // 1. Inject CSS to hide div#kb while keeping it active in the background for the script
+    const style = document.createElement('style');
+    style.innerHTML = `
+        div#kb {
+            position: absolute !important;
+            left: -9999px !important;
+            top: -9999px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            height: 0 !important;
+            overflow: hidden !important;
+        }
+    `;
+    document.head.appendChild(style);
 
     // Helper to simulate a complete pointer/mouse interaction sequence
     function simulateClick(element) {
@@ -25,7 +40,7 @@
     // Helper to find specific key buttons or primary action buttons
     function findButton(key) {
         const buttons = Array.from(document.querySelectorAll('button'));
-
+        
         return buttons.find(button => {
             const buttonText = (button.textContent || button.innerText || '').replace(/\s+/g, '').toLowerCase();
             const ariaLabel = (button.getAttribute('aria-label') || '').replace(/\s+/g, '').toLowerCase();
@@ -34,11 +49,11 @@
 
             // Handle Enter key: triggers any primary buttons (e.g., #n.btn.primary, #sub.btn.primary, or any class containing 'primary')
             if (key === 'enter') {
-                return classList.includes('primary') ||
-                       id === 'n' ||
-                       id === 'sub' ||
-                       buttonText.includes('enter') ||
-                       buttonText.includes('go') ||
+                return classList.includes('primary') || 
+                       id === 'n' || 
+                       id === 'sub' || 
+                       buttonText.includes('enter') || 
+                       buttonText.includes('go') || 
                        ariaLabel.includes('enter');
             }
 
