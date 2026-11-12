@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
-// @version      1.4
+// @version      1.5
 // @description  Add keyboard support to Spelling Time
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
@@ -9,40 +9,6 @@
 // @updateURL    https://github.com/ilim-cell/Spelling-Time/raw/refs/heads/main/keyboard.meta.js
 // @downloadURL  https://github.com/ilim-cell/Spelling-Time/raw/refs/heads/main/keyboard.user.js
 // ==/UserScript==
-
-
-// IMPORTANT:
-
-
-// CLICK ON THE "INSTALL" BUTTON ABOVE THIS SCRIPT!
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 (function() {
     'use strict';
@@ -56,28 +22,42 @@
         });
     }
 
-    // Helper to find specific key buttons
+    // Helper to find specific key buttons or primary action buttons
     function findButton(key) {
         const buttons = Array.from(document.querySelectorAll('button'));
+
         return buttons.find(button => {
             const buttonText = (button.textContent || button.innerText || '').replace(/\s+/g, '').toLowerCase();
             const ariaLabel = (button.getAttribute('aria-label') || '').replace(/\s+/g, '').toLowerCase();
             const classList = button.className.toLowerCase();
+            const id = button.id.toLowerCase();
 
+            // Handle Enter key: triggers any primary buttons (e.g., #n.btn.primary, #sub.btn.primary, or any class containing 'primary')
+            if (key === 'enter') {
+                return classList.includes('primary') ||
+                       id === 'n' ||
+                       id === 'sub' ||
+                       buttonText.includes('enter') ||
+                       buttonText.includes('go') ||
+                       ariaLabel.includes('enter');
+            }
+
+            // Handle Backspace
             if (key === 'backspace') {
                 return classList.includes('k-back') || buttonText === 'delete' || ariaLabel === 'delete';
             }
+
+            // Handle Arrow Keys
             if (key === 'arrowleft') {
                 return classList.includes('k-left') || buttonText.includes('moveleft') || ariaLabel.includes('moveleft');
             }
             if (key === 'arrowright') {
                 return classList.includes('k-right') || buttonText.includes('moveright') || ariaLabel.includes('moveright');
             }
+
+            // Handle Spacebar
             if (key === ' ' || key === 'spacebar') {
                 return buttonText === '' || buttonText.includes('space') || ariaLabel.includes('space');
-            }
-            if (key === 'enter') {
-                return buttonText.includes('enter') || buttonText.includes('go') || ariaLabel.includes('enter');
             }
 
             return buttonText === key || ariaLabel === key;
@@ -111,19 +91,34 @@
         const pressedKey = event.key;
         const lowerKey = pressedKey.toLowerCase();
 
-        // Completely ignore native CapsLock handling
+        // 1. Handle CapsLock gracefully (do nothing and don't block)
         if (pressedKey === 'CapsLock') {
             return;
         }
 
-        // 1. Try finding the key directly in the current view
+        // 2. Handle Forward Delete key by emulating a move right followed by backspace
+        if (pressedKey === 'Delete') {
+            event.preventDefault();
+            const rightBtn = findButton('arrowright');
+            const backBtn = findButton('backspace');
+
+            if (rightBtn && backBtn) {
+                simulateClick(rightBtn);
+                setTimeout(() => {
+                    simulateClick(backBtn);
+                }, 10);
+            }
+            return;
+        }
+
+        // 3. Try finding the key directly in the current view
         let targetButton = findButton(lowerKey);
 
         if (targetButton) {
             event.preventDefault();
             simulateClick(targetButton);
         } else {
-            // 2. If not found, it's likely hidden in the symbols panel
+            // 4. If not found, it's likely hidden in the symbols panel
             const symButton = findLayoutButton('sym');
 
             if (symButton) {
