@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
-// @version      1.6
-// @description  Add keyboard support to Spelling Time
+// @version      2.0
+// @description  Add keyboard support and customizable settings to Spelling Time
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // @updateURL    https://github.com/ilim-cell/Spelling-Time/raw/refs/heads/main/keyboard.meta.js
 // @downloadURL  https://github.com/ilim-cell/Spelling-Time/raw/refs/heads/main/keyboard.user.js
 // ==/UserScript==
@@ -13,47 +15,121 @@
 (function() {
     'use strict';
 
-    // 1. Inject CSS to hide div#kb while keeping it active in the background for the script
-    const style = document.createElement('style');
-    style.innerHTML = `
-        div#kb {
-            position: absolute !important;
-            left: -9999px !important;
-            top: -9999px !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
-            height: 0 !important;
-            overflow: hidden !important;
-        }
-    `;
-    document.head.appendChild(style);
+    // --- Default Settings ---
+    const DEFAULT_SETTINGS = {
+        enableHintKey: true,
+        hintKeyCode: 'Backquote', // Physical ` key
+        hintKeyLabel: '`',
+        hideOnScreenKeyboard: true
+    };
+
+    function getSetting(key) {
+        return GM_getValue(key, DEFAULT_SETTINGS[key]);
+    }
+
+    function setSetting(key, value) {
+        GM_setValue(key, value);
+    }
+
+    // --- Tampermonkey Menu Settings ---
+    function registerSettingsMenu() {
+        const hintEnabled = getSetting('enableHintKey');
+        const hintLabel = getSetting('hintKeyLabel');
+        const hideKb = getSetting('hideOnScreenKeyboard');
+
+        GM_registerMenuCommand(
+            `Hint Shortcut (${hintLabel}): ${hintEnabled ? 'ON' : 'OFF'}`,
+            () => {
+                setSetting('enableHintKey', !hintEnabled);
+                location.reload();
+            }
+        );
+
+        GM_registerMenuCommand(
+            `Set Hint Key (Current: ${hintLabel})`,
+            () => {
+                const input = prompt(
+                    'Enter a single character or key name for Hint (e.g., `, /, ?, h):',
+                    hintLabel
+                );
+                if (input !== null && input.trim() !== '') {
+                    const clean = input.trim();
+                    setSetting('hintKeyLabel', clean);
+                    setSetting('hintKeyCode', clean === '`' ? 'Backquote' : '');
+                    location.reload();
+                }
+            }
+        );
+
+        GM_registerMenuCommand(
+            `Hide On-Screen Keyboard: ${hideKb ? 'ON' : 'OFF'}`,
+            () => {
+                setSetting('hideOnScreenKeyboard', !hideKb);
+                location.reload();
+            }
+        );
+    }
+
+    registerSettingsMenu();
+
+    // 1. Inject CSS to hide div#kb if enabled in settings
+    if (getSetting('hideOnScreenKeyboard')) {
+        const style = document.createElement('style');
+        style.innerHTML = `
+            div#kb {
+                position: absolute !important;
+                left: -9999px !important;
+                top: -9999px !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+                height: 0 !important;
+                overflow: hidden !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
 
     // Helper to simulate a complete pointer/mouse interaction sequence
     function simulateClick(element) {
-        const eventOptions = { bubbles: true, cancelable: true, view: window };
-        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(eventType => {
-            const mouseEvt = new MouseEvent(eventType, eventOptions);
-            element.dispatchEvent(mouseEvt);
-        });
+        if (!element || element.disabled) return;
+
+        // Omit `view: window` because Tampermonkey's sandboxed `window` proxy fails UIEventInit validation
+        const eventOptions = {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            buttons: 1
+        };
+
+        if (typeof PointerEvent !== 'undefined') {
+            element.dispatchEvent(new PointerEvent('pointerdown', eventOptions));
+        }
+        element.dispatchEvent(new MouseEvent('mousedown', eventOptions));
+
+        if (typeof PointerEvent !== 'undefined') {
+            element.dispatchEvent(new PointerEvent('pointerup', eventOptions));
+        }
+        element.dispatchEvent(new MouseEvent('mouseup', eventOptions));
+        element.dispatchEvent(new MouseEvent('click', eventOptions));
     }
 
     // Helper to find specific key buttons or primary action buttons
     function findButton(key) {
         const buttons = Array.from(document.querySelectorAll('button'));
-        
+
         return buttons.find(button => {
             const buttonText = (button.textContent || button.innerText || '').replace(/\s+/g, '').toLowerCase();
             const ariaLabel = (button.getAttribute('aria-label') || '').replace(/\s+/g, '').toLowerCase();
             const classList = button.className.toLowerCase();
             const id = button.id.toLowerCase();
 
-            // Handle Enter key: triggers any primary buttons (e.g., #n.btn.primary, #sub.btn.primary, or any class containing 'primary')
+            // Handle Enter key
             if (key === 'enter') {
-                return classList.includes('primary') || 
-                       id === 'n' || 
-                       id === 'sub' || 
-                       buttonText.includes('enter') || 
-                       buttonText.includes('go') || 
+                return classList.includes('primary') ||
+                       id === 'n' ||
+                       id === 'sub' ||
+                       buttonText.includes('enter') ||
+                       buttonText.includes('go') ||
                        ariaLabel.includes('enter');
             }
 
@@ -106,7 +182,26 @@
         const pressedKey = event.key;
         const lowerKey = pressedKey.toLowerCase();
 
-        // 1. Handle CapsLock gracefully (do nothing and don't block)
+        // 0. Handle Hint shortcut (defaults to Backquote / `)
+        if (getSetting('enableHintKey')) {
+            const targetCode = getSetting('hintKeyCode');
+            const targetLabel = getSetting('hintKeyLabel').toLowerCase();
+            const isHintMatch = (targetCode && event.code === targetCode) ||
+                                (lowerKey === targetLabel) ||
+                                (targetLabel === '`' && (pressedKey === '`' || pressedKey === '~' || event.code === 'Backquote'));
+
+            if (isHintMatch) {
+                const hintBtn = document.querySelector('button#hint.btn.small') || document.getElementById('hint');
+                if (hintBtn) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    simulateClick(hintBtn);
+                }
+                return;
+            }
+        }
+
+        // 1. Handle CapsLock gracefully
         if (pressedKey === 'CapsLock') {
             return;
         }
@@ -157,5 +252,5 @@
                 }, 0);
             }
         }
-    });
+    }, true);
 })();
