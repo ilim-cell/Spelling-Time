@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
-// @version      2.3
-// @description  Intercept Ctrl/Cmd shortcuts, block Enter key repeat, fast paste, undo/redo, and keyboard support for Spelling Time
+// @version      2.9
+// @description  Intercept Ctrl/Cmd shortcuts, block Enter key repeat, fast paste, undo/redo, and keyboard support for Spelling Time with fallback button selectors
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
 // @grant        GM_getValue
@@ -85,6 +85,16 @@
         return new Promise(resolve => requestAnimationFrame(() => resolve()));
     }
 
+    function normalizeLabel(el) {
+        return (el.textContent || el.innerText || '').trim();
+    }
+
+    function isVisibleAndEnabled(el) {
+        if (!el || el.disabled) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
     // --- Tampermonkey Menu Settings ---
     function registerSettingsMenu() {
         const hintEnabled = getSetting('enableHintKey');
@@ -126,11 +136,13 @@
 
     registerSettingsMenu();
 
-    // 1. Inject CSS to hide div#kb if enabled in settings
+    // 1. Inject CSS to hide on-screen keyboard containers if enabled in settings
     if (getSetting('hideOnScreenKeyboard')) {
         const style = document.createElement('style');
         style.innerHTML = `
-            div#kb {
+            div#kb,
+            .wgk-wrap,
+            .hk-wrap {
                 position: absolute !important;
                 left: -9999px !important;
                 top: -9999px !important;
@@ -213,11 +225,72 @@
         return true;
     }
 
+    // --- Layout Detection & Fallback Button Resolution ---
+    function hasDefaultKbLayout() {
+        const kb = document.getElementById('kb');
+        return Boolean(kb && kb.querySelector('button[data-k]'));
+    }
+
+    function hasWgkLayout() {
+        return document.querySelectorAll('button.wgk').length > 0;
+    }
+
+    function hasHkLayout() {
+        return document.querySelectorAll('button.hk').length > 0;
+    }
+
+    function findWgkLetterButton(upperChar) {
+        const buttons = Array.from(document.querySelectorAll('button.wgk:not(.wide)'));
+        return buttons.find(btn => normalizeLabel(btn).toUpperCase() === upperChar && !btn.disabled) || null;
+    }
+
+    function findWgkWideButton(targetLabel) {
+        const lowerTarget = targetLabel.toLowerCase();
+        const buttons = Array.from(document.querySelectorAll('button.wgk.wide'));
+        return buttons.find(btn => normalizeLabel(btn).toLowerCase() === lowerTarget && !btn.disabled) || null;
+    }
+
+    function findHkLetterButton(upperChar) {
+        const buttons = Array.from(document.querySelectorAll('button.hk'));
+        return buttons.find(btn => normalizeLabel(btn).toUpperCase() === upperChar && !btn.disabled) || null;
+    }
+
     function findKbDataKeyButton(dataKey) {
         const kb = document.getElementById('kb');
         if (!kb) return null;
         const buttons = Array.from(kb.querySelectorAll('button[data-k]'));
         return buttons.find(btn => btn.getAttribute('data-k') === dataKey && !btn.disabled) || null;
+    }
+
+    function findBackButton() {
+        if (hasDefaultKbLayout()) {
+            return findKbDataKeyButton('back');
+        }
+        if (hasWgkLayout()) {
+            return findWgkWideButton('Delete');
+        }
+        return null;
+    }
+
+    function findEnterButton() {
+        if (hasWgkLayout()) {
+            const wgkEnter = findWgkWideButton('Enter');
+            if (wgkEnter) return wgkEnter;
+        }
+
+        const buttons = Array.from(document.querySelectorAll('button'));
+        return buttons.find(button => {
+            const buttonText = (button.textContent || button.innerText || '').replace(/\s+/g, '').toLowerCase();
+            const ariaLabel = (button.getAttribute('aria-label') || '').replace(/\s+/g, '').toLowerCase();
+            const classList = button.className.toLowerCase();
+            const id = button.id.toLowerCase();
+            return classList.includes('primary') ||
+                   id === 'n' ||
+                   id === 'sub' ||
+                   buttonText.includes('enter') ||
+                   buttonText.includes('go') ||
+                   ariaLabel.includes('enter');
+        });
     }
 
     function resolveTargetDataKey(rawKey, code = '') {
@@ -274,20 +347,36 @@
         return null;
     }
 
-    function findEnterButton() {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        return buttons.find(button => {
-            const buttonText = (button.textContent || button.innerText || '').replace(/\s+/g, '').toLowerCase();
-            const ariaLabel = (button.getAttribute('aria-label') || '').replace(/\s+/g, '').toLowerCase();
-            const classList = button.className.toLowerCase();
-            const id = button.id.toLowerCase();
-            return classList.includes('primary') ||
-                   id === 'n' ||
-                   id === 'sub' ||
-                   buttonText.includes('enter') ||
-                   buttonText.includes('go') ||
-                   ariaLabel.includes('enter');
-        });
+    function resolveUpperLetter(rawKey, code = '') {
+        if (/^[a-zA-Z]$/.test(rawKey)) {
+            return rawKey.toUpperCase();
+        }
+        if (code && /^Key([A-Z])$/.test(code)) {
+            return code.replace(/^Key/, '').toUpperCase();
+        }
+        return null;
+    }
+
+    async function typeViaFallbackKeyboards(rawKey, code = '') {
+        if (rawKey === 'Backspace') {
+            const delBtn = findWgkWideButton('Delete');
+            return delBtn ? clickActionButton(delBtn) : false;
+        }
+
+        const upperLetter = resolveUpperLetter(rawKey, code);
+        if (!upperLetter) return false;
+
+        if (hasWgkLayout()) {
+            const wgkBtn = findWgkLetterButton(upperLetter);
+            if (wgkBtn) return clickActionButton(wgkBtn);
+        }
+
+        if (hasHkLayout()) {
+            const hkBtn = findHkLetterButton(upperLetter);
+            if (hkBtn) return clickActionButton(hkBtn);
+        }
+
+        return false;
     }
 
     async function typeKeyAsync(rawKey, code = '', shiftKey = false) {
@@ -298,6 +387,10 @@
                 return true;
             }
             return false;
+        }
+
+        if (!hasDefaultKbLayout()) {
+            return typeViaFallbackKeyboards(rawKey, code);
         }
 
         const dataKey = resolveTargetDataKey(rawKey, code);
@@ -339,6 +432,7 @@
         const shouldRecord = options.record !== false;
         const chars = Array.from(text).filter(ch => ch !== '\r');
         const insertedEntries = [];
+        const useDefaultKb = hasDefaultKbLayout();
 
         for (let i = 0; i < chars.length; i++) {
             const ch = chars[i];
@@ -346,6 +440,14 @@
             if (ch === '\n') {
                 const enterBtn = findEnterButton();
                 if (enterBtn) clickActionButton(enterBtn);
+                continue;
+            }
+
+            if (!useDefaultKb) {
+                const ok = await typeViaFallbackKeyboards(ch, '');
+                if (ok) {
+                    insertedEntries.push({ rawKey: ch, code: '' });
+                }
                 continue;
             }
 
@@ -388,20 +490,34 @@
         }
     }
 
+    function triggerBackAction() {
+        if (hasDefaultKbLayout()) {
+            const backBtn = findKbDataKeyButton('back');
+            if (backBtn) {
+                clickKbElement(backBtn);
+                return true;
+            }
+        } else if (hasWgkLayout()) {
+            const delBtn = findWgkWideButton('Delete');
+            if (delBtn) {
+                clickActionButton(delBtn);
+                return true;
+            }
+        }
+        return false;
+    }
+
     async function performUndo() {
         const action = undoStack.pop();
         if (!action) return;
 
         isReplayingHistory = true;
         try {
-            const backBtn = findKbDataKeyButton('back');
             if (action.type === 'key' || action.type === 'back') {
-                if (backBtn) clickKbElement(backBtn);
+                triggerBackAction();
             } else if (action.type === 'paste') {
-                if (backBtn) {
-                    for (let i = 0; i < action.entries.length; i++) {
-                        clickKbElement(backBtn);
-                    }
+                for (let i = 0; i < action.entries.length; i++) {
+                    triggerBackAction();
                 }
             }
             redoStack.push(action);
@@ -421,8 +537,7 @@
             } else if (action.type === 'paste') {
                 await pasteStringFast(action.entries.map(e => e.rawKey).join(''), { record: false });
             } else if (action.type === 'back') {
-                const backBtn = findKbDataKeyButton('back');
-                if (backBtn) clickKbElement(backBtn);
+                triggerBackAction();
             }
             undoStack.push(action);
         } finally {
@@ -432,15 +547,17 @@
 
     function extractSpelledText() {
         const slotSelectors = [
-            '[class*="slot"]:not([class*="kb"])',
-            '[class*="letter"]:not([class*="kb"])',
-            '[class*="tile"]:not([class*="kb"])',
-            '[class*="char"]:not([class*="kb"])',
+            '[class*="slot"]:not([class*="kb"]):not([class*="wgk"]):not([class*="hk"])',
+            '[class*="letter"]:not([class*="kb"]):not([class*="wgk"]):not([class*="hk"])',
+            '[class*="tile"]:not([class*="kb"]):not([class*="wgk"]):not([class*="hk"])',
+            '[class*="char"]:not([class*="kb"]):not([class*="wgk"]):not([class*="hk"])',
             '[data-letter]'
         ];
 
         for (const selector of slotSelectors) {
-            const nodes = Array.from(document.querySelectorAll(selector)).filter(el => !el.closest('#kb'));
+            const nodes = Array.from(document.querySelectorAll(selector)).filter(
+                el => !el.closest('#kb, .wgk, .hk')
+            );
             if (nodes.length > 0) {
                 const text = nodes
                     .map(el => el.dataset.letter || el.textContent || '')
@@ -607,28 +724,39 @@
         // 2. Handle Forward Delete key
         if (pressedKey === 'Delete') {
             event.preventDefault();
-            const rightBtn = findKbDataKeyButton('right');
-            const backBtn = findKbDataKeyButton('back');
-
-            if (rightBtn && backBtn) {
-                clickKbElement(rightBtn);
-                clickKbElement(backBtn);
-                recordAction({ type: 'back' });
+            if (hasDefaultKbLayout()) {
+                const rightBtn = findKbDataKeyButton('right');
+                const backBtn = findKbDataKeyButton('back');
+                if (rightBtn && backBtn) {
+                    clickKbElement(rightBtn);
+                    clickKbElement(backBtn);
+                    recordAction({ type: 'back' });
+                }
+            } else if (hasWgkLayout()) {
+                const delBtn = findWgkWideButton('Delete');
+                if (delBtn) {
+                    clickActionButton(delBtn);
+                    recordAction({ type: 'back' });
+                }
             }
             return;
         }
 
-        // 3. Handle typing via KB's data-k buttons (including shift + letters and sym layer transitions)
-        const mappedDataKey = resolveTargetDataKey(pressedKey, event.shiftKey ? event.code : '');
+        // 3. Handle typing via #kb data-k buttons, or fallback to button.wgk / button.hk
+        const useDefaultKb = hasDefaultKbLayout();
+        const mappedDataKey = useDefaultKb
+            ? resolveTargetDataKey(pressedKey, event.shiftKey ? event.code : '')
+            : resolveUpperLetter(pressedKey, event.code);
+
         if (mappedDataKey || pressedKey === 'Enter') {
             event.preventDefault();
-            typeKeyAsync(pressedKey, event.shiftKey ? event.code : '', event.shiftKey).then(typed => {
+            typeKeyAsync(pressedKey, useDefaultKb && event.shiftKey ? event.code : '', useDefaultKb && event.shiftKey).then(typed => {
                 if (typed && pressedKey !== 'Enter') {
                     recordAction({
                         type: mappedDataKey === 'back' ? 'back' : 'key',
                         rawKey: pressedKey,
-                        code: event.shiftKey ? event.code : '',
-                        shiftKey: event.shiftKey
+                        code: useDefaultKb && event.shiftKey ? event.code : '',
+                        shiftKey: useDefaultKb && event.shiftKey
                     });
                 }
             });
