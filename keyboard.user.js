@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
-// @version      2.9
+// @version      26.3.5.2
 // @description  Intercept Ctrl/Cmd shortcuts, block Enter key repeat, fast paste, undo/redo, and keyboard support for Spelling Time with fallback button selectors
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
@@ -180,7 +180,6 @@
         return Boolean(el && el.tagName === 'BUTTON' && el.id !== 'hint');
     }
 
-    // KB.press listens to pointerdown on #kb
     function clickKbElement(el) {
         if (!el || el.disabled) return false;
 
@@ -244,10 +243,34 @@
         return buttons.find(btn => normalizeLabel(btn).toUpperCase() === upperChar && !btn.disabled) || null;
     }
 
-    function findWgkWideButton(targetLabel) {
+    function findWgkWideButton(targetLabel, allowDisabled = false) {
         const lowerTarget = targetLabel.toLowerCase();
         const buttons = Array.from(document.querySelectorAll('button.wgk.wide'));
-        return buttons.find(btn => normalizeLabel(btn).toLowerCase() === lowerTarget && !btn.disabled) || null;
+
+        return buttons.find(btn => {
+            if (!allowDisabled && btn.disabled) return false;
+
+            const text = normalizeLabel(btn).toLowerCase();
+            const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+            const title = (btn.getAttribute('title') || '').trim().toLowerCase();
+
+            if (lowerTarget === 'delete' || lowerTarget === 'backspace') {
+                return (
+                    text.includes('delete') ||
+                    text.includes('backspace') ||
+                    text.includes('⌫') ||
+                    aria.includes('delete') ||
+                    aria.includes('backspace') ||
+                    title.includes('delete') ||
+                    title.includes('backspace') ||
+                    btn.querySelector('svg') ||
+                    btn.querySelector('[class*="delete"]') ||
+                    btn.querySelector('[class*="back"]')
+                );
+            }
+
+            return text === lowerTarget || aria === lowerTarget || title === lowerTarget;
+        }) || buttons[0] || null; // Fallback to first wide button if it's the delete key layout
     }
 
     function findHkLetterButton(upperChar) {
@@ -623,7 +646,7 @@
         const pressedKey = event.key;
         const lowerKey = pressedKey.toLowerCase();
 
-        if (event.repeat && (pressedKey === 'Enter' || pressedKey === 'Delete')) {
+        if (event.repeat && (pressedKey === 'Enter' || pressedKey === 'Delete' || pressedKey === 'Backspace')) {
             event.preventDefault();
             event.stopPropagation();
             return;
@@ -721,7 +744,26 @@
             return;
         }
 
-        // 2. Handle Forward Delete key
+        // 2. Handle Backspace key explicitly
+        if (pressedKey === 'Backspace') {
+            event.preventDefault();
+            if (hasDefaultKbLayout()) {
+                const backBtn = findKbDataKeyButton('back');
+                if (backBtn) {
+                    clickKbElement(backBtn);
+                    recordAction({ type: 'back' });
+                }
+            } else if (hasWgkLayout()) {
+                const delBtn = findWgkWideButton('Delete');
+                if (delBtn) {
+                    clickActionButton(delBtn);
+                    recordAction({ type: 'back' });
+                }
+            }
+            return;
+        }
+
+        // 3. Handle Forward Delete key
         if (pressedKey === 'Delete') {
             event.preventDefault();
             if (hasDefaultKbLayout()) {
@@ -742,7 +784,7 @@
             return;
         }
 
-        // 3. Handle typing via #kb data-k buttons, or fallback to button.wgk / button.hk
+        // 4. Handle typing via #kb data-k buttons, or fallback to button.wgk / button.hk
         const useDefaultKb = hasDefaultKbLayout();
         const mappedDataKey = useDefaultKb
             ? resolveTargetDataKey(pressedKey, event.shiftKey ? event.code : '')
