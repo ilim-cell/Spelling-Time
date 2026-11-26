@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Keyboard Support for Spelling Time
 // @namespace    http://tampermonkey.net
-// @version      2.0
-// @description  Add keyboard support and customizable settings to Spelling Time
+// @version      2.3
+// @description  Intercept Ctrl/Cmd shortcuts, block Enter key repeat, fast paste, undo/redo, and keyboard support for Spelling Time
 // @author       Isaac
 // @match        *://*.haydnsbooks.github.io/Spelling-Time/*
 // @grant        GM_getValue
